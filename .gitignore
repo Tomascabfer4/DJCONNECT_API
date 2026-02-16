@@ -1,0 +1,17 @@
+# Visual Studio
+.vs/
+.vscode/
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# Archivos de usuario
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Variables de entorno (¡Muy importante no subir esto!)
+appsettings.Development.json
+.env
