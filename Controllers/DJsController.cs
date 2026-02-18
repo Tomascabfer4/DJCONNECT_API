@@ -149,19 +149,27 @@ namespace API_DJCONNECT.Controllers
             return Ok(new { mensaje = "Perfil actualizado correctamente" });
         }
 
+        // GET: api/DJs/buscar
         [HttpGet("buscar")]
         public async Task<ActionResult<IEnumerable<object>>> BuscarDJs(
+        [FromQuery] string? nombre, // <--- NUEVO PARÁMETRO
         [FromQuery] string? genero,
         [FromQuery] decimal? precioMax,
         [FromQuery] string? ubicacion)
         {
-            // 1. Empezamos con la consulta base incluyendo el perfil
             var query = _context.Usuarios
                 .Include(u => u.DjPerfil)
                 .Where(u => u.TipoUsuario == "dj" && u.Activo == true)
                 .AsQueryable();
 
-            // 2. Aplicamos filtros solo si el usuario los envía
+            // 1. Filtro por NOMBRE (Artistico o Real)
+            if (!string.IsNullOrEmpty(nombre))
+            {
+                query = query.Where(u => u.DjPerfil.NombreArtistico.ToLower().Contains(nombre.ToLower()) 
+                                      || u.Nombre.ToLower().Contains(nombre.ToLower()));
+            }
+
+            // 2. Otros filtros
             if (!string.IsNullOrEmpty(genero))
             {
                 query = query.Where(u => u.DjPerfil.Generos.ToLower().Contains(genero.ToLower()));
@@ -177,7 +185,6 @@ namespace API_DJCONNECT.Controllers
                 query = query.Where(u => u.Ubicacion.ToLower().Contains(ubicacion.ToLower()));
             }
 
-            // 3. Proyectamos a un objeto limpio para el Frontend
             var resultados = await query.Select(u => new
             {
                 u.Id,
