@@ -11,6 +11,7 @@
     /// </summary>
     public class DjPublicoDto
     {
+        public int Id { get; set; }
         public string NombreArtistico { get; set; } = string.Empty;
         public string Ciudad { get; set; } = string.Empty;
         public string GenerosMusicales { get; set; } = string.Empty;

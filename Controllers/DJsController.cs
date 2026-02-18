@@ -28,11 +28,11 @@ namespace API_DJCONNECT.Controllers
         public async Task<ActionResult<IEnumerable<DjPublicoDto>>> GetDJs()
         {
             var djs = await _context.Usuarios
-                .Where(u => u.TipoUsuario == "dj" && u.Activo == true) // Solo queremos DJs
-                .Include(u => u.DjPerfil)          // Traemos su perfil extendido
+                .Where(u => u.TipoUsuario == "dj" && u.Activo == true)
+                .Include(u => u.DjPerfil)
                 .Select(usuario => new DjPublicoDto
                 {
-                    // Mapeamos a DTO para no enseñar datos privados
+                    Id = usuario.Id,
                     NombreArtistico = usuario.DjPerfil.NombreArtistico ?? usuario.Nombre,
                     Ciudad = usuario.Ubicacion ?? "Mundo",
                     Foto = usuario.FotoPerfil,
