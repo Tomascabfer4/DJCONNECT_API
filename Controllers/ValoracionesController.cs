@@ -56,6 +56,29 @@ namespace API_DJCONNECT.Controllers
             return Ok(new { mensaje = "Valoración guardada correctamente" });
         }
 
+        // GET: api/Valoraciones/dj/5
+        [HttpGet("dj/{djId}")]
+        [AllowAnonymous]
+        public async Task<ActionResult<IEnumerable<ValoracionRespuestaDto>>> GetValoracionesPorDj(int djId)
+        {
+            var valoraciones = await _context.Valoraciones
+                .Include(v => v.Cliente)
+                .Where(v => v.DjId == djId)
+                .OrderByDescending(v => v.FechaCreacion) 
+                .ToListAsync();
+
+            var resultado = valoraciones.Select(v => new ValoracionRespuestaDto
+            {
+                Id = v.Id,
+                Puntuacion = v.Puntuacion,
+                Comentario = v.Comentario,
+                ClienteNombre = v.Cliente.Nombre,
+                Fecha = v.FechaCreacion
+            }).ToList();
+
+            return Ok(resultado);
+        }
+
         private async Task RecalcularPromedioDj(int djId)
         {
             var promedio = await _context.Valoraciones

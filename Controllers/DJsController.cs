@@ -44,27 +44,42 @@ namespace API_DJCONNECT.Controllers
             return Ok(djs);
         }
 
-        // 2. OBTENER UN DJ POR ID (Ficha de detalle)
+        // 2. OBTENER UN DJ POR ID (Ficha de detalle COMPLETA)
         // GET: api/DJs/5
-        //[HttpGet("{id}")]
-        //public async Task<ActionResult<DjPublicoDto>> GetDJ(int id)
-        //{
-        //    var usuario = await _context.Usuarios
-        //        .Where(u => u.Id == id && u.TipoUsuario == "dj" && u.Activo == true) // <--- Filtro Activo añadido
-        //        .Include(u => u.DjPerfil)
-        //        .FirstOrDefaultAsync();
+        [HttpGet("{id}")]
+        [AllowAnonymous] // Importante: Cualquiera debe poder ver el perfil
+        public async Task<ActionResult<DjDetalleDto>> GetDJ(int id)
+        {
+            // Buscamos el usuario DJ por su ID
+            var usuario = await _context.Usuarios
+                .Include(u => u.DjPerfil)
+                .FirstOrDefaultAsync(u => u.Id == id && u.TipoUsuario == "dj" && u.Activo == true);
 
-        //    if (usuario == null) return NotFound();
+            if (usuario == null)
+            {
+                return NotFound("DJ no encontrado");
+            }
 
-        //    return new DjPublicoDto
-        //    {
-        //        NombreArtistico = usuario.DjPerfil.NombreArtistico ?? usuario.Nombre,
-        //        Ciudad = usuario.Ubicacion ?? "Mundo",
-        //        Foto = usuario.FotoPerfil,
-        //        GenerosMusicales = usuario.DjPerfil.Generos ?? "Varios",
-        //        Precio = usuario.DjPerfil.PrecioPorHora
-        //    };
-        //}
+            // Calculamos el número de valoraciones reales si existe la tabla
+            int numValoraciones = await _context.Valoraciones.CountAsync(v => v.DjId == usuario.Id);
+
+            // Mapeamos al DTO completo (DjDetalleDto)
+            var djDto = new DjDetalleDto
+            {
+                Id = usuario.Id,
+                NombreArtistico = usuario.DjPerfil.NombreArtistico ?? usuario.Nombre,
+                Bio = usuario.DjPerfil.Bio, // <--- Dato clave para el detalle
+                GenerosMusicales = usuario.DjPerfil.Generos ?? "Varios",
+                Precio = usuario.DjPerfil.PrecioPorHora,
+                AniosExperiencia = usuario.DjPerfil.AniosExperiencia, // <--- Dato clave
+                ValoracionPromedio = (double)usuario.DjPerfil.ValoracionPromedio,
+                NumeroValoraciones = numValoraciones,
+                Ciudad = usuario.Ubicacion ?? "No especificada",
+                Foto = usuario.FotoPerfil
+            };
+
+            return Ok(djDto);
+        }
 
         // 3. BUSCAR POR GÉNERO
         // GET: api/DJs/genero/Techno
