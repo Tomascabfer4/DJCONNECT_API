@@ -190,11 +190,21 @@ namespace API_DJCONNECT.Controllers
                 u.Id,
                 u.Nombre,
                 NombreArtistico = u.DjPerfil.NombreArtistico,
-                u.FotoPerfil,
-                u.Ubicacion,
-                u.DjPerfil.Generos,
-                u.DjPerfil.PrecioPorHora,
-                u.DjPerfil.ValoracionPromedio
+                Foto = u.FotoPerfil, 
+                
+                // Mantenemos estos nombres si tu frontend ya los usa así, 
+                // o los ajustamos a tu DTO si prefieres estandarizar.
+                // Por si acaso, envío ambos para asegurar compatibilidad:
+                Ciudad = u.Ubicacion, 
+                Ubicacion = u.Ubicacion, 
+                
+                Generos = u.DjPerfil.Generos,
+                GenerosMusicales = u.DjPerfil.Generos, // Alias para compatibilidad con DJCard
+                
+                Precio = u.DjPerfil.PrecioPorHora, // Alias clave para DJCard
+                PrecioPorHora = u.DjPerfil.PrecioPorHora,
+                
+                ValoracionPromedio = u.DjPerfil.ValoracionPromedio
             }).ToListAsync();
 
             return Ok(resultados);
