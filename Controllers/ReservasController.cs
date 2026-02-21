@@ -133,7 +133,7 @@ namespace API_DJCONNECT.Controllers
         }
 
         // 4. CAMBIAR ESTADO (Solo DJ: Aceptar/Rechazar)
-        [HttpPatch("{id}/estado")]
+        [HttpPut("{id}/estado")]
         // Quitamos el Role="dj" estricto aquí para manejarlo manualmente si el token usa "role" en vez de "Role"
         public async Task<IActionResult> CambiarEstado(int id, [FromBody] string nuevoEstado)
         {
