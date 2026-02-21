@@ -162,7 +162,9 @@ namespace API_DJCONNECT.Controllers
                 Nombre = usuario.Nombre,
                 Email = usuario.Email,
                 Foto = usuario.FotoPerfil,
-                Rol = usuario.TipoUsuario
+                Rol = usuario.TipoUsuario,
+                Telefono = usuario.Telefono,
+                Ubicacion = usuario.Ubicacion
             };
         }
 
