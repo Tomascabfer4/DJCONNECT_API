@@ -68,6 +68,7 @@ namespace API_DJCONNECT.Controllers
                 return BadRequest("No puedes realizar una reserva para ti mismo.");
 
             // Validación: No reservar en el pasado
+            // Nota: Comparamos con DateTime.Now para validar respecto a la hora local del servidor
             if (reservaDto.FechaEvento < DateTime.Now)
                 return BadRequest("No puedes crear una reserva para una fecha pasada.");
 
@@ -78,7 +79,6 @@ namespace API_DJCONNECT.Controllers
             if (dj == null) return BadRequest("El DJ seleccionado no existe o no es un perfil de DJ.");
 
             // 🛡️ VALIDACIÓN DE DISPONIBILIDAD
-            // No permitimos reservar si el DJ ya tiene algo ACEPTADO ese día
             bool ocupado = await _context.Reservas.AnyAsync(r =>
                 r.DjId == reservaDto.DjId &&
                 r.FechaEvento.Date == reservaDto.FechaEvento.Date &&
@@ -89,22 +89,38 @@ namespace API_DJCONNECT.Controllers
                 return BadRequest("El DJ ya tiene un compromiso confirmado para esta fecha.");
             }
 
+            // 🛠️ CÁLCULO PROFESIONAL DEL PRECIO
+            // Extraemos el número de horas del string 'Horario' (ej: "5")
+            if (!int.TryParse(reservaDto.Horario, out int numHoras)) numHoras = 1;
+
+            // El precio total es: $$PrecioAcordado = PrecioPorHora \times Horas$$
+            decimal precioPorHora = dj.DjPerfil?.PrecioPorHora ?? 0;
+            decimal precioTotal = precioPorHora * numHoras;
+
             var nuevaReserva = new Reserva
             {
                 DjId = reservaDto.DjId,
                 ClienteId = clienteId,
-                FechaEvento = reservaDto.FechaEvento.ToUniversalTime(),
+
+                // ✅ SOLUCIÓN AL DESFASE DE HORA:
+                // Eliminamos .ToUniversalTime() para que .NET guarde la hora exacta que seleccionó 
+                // el usuario (ej: 22:00) sin restarle la diferencia horaria.
+                FechaEvento = reservaDto.FechaEvento,
+
                 Horario = reservaDto.Horario,
                 TipoEvento = reservaDto.TipoEvento,
                 UbicacionEvento = reservaDto.UbicacionEvento,
-                PrecioAcordado = dj.DjPerfil?.PrecioPorHora ?? 0,
+
+                // ✅ ASIGNACIÓN DEL PRECIO TOTAL CALCULADO
+                PrecioAcordado = precioTotal,
+
                 Estado = "pendiente"
             };
 
             _context.Reservas.Add(nuevaReserva);
             await _context.SaveChangesAsync();
 
-            return Ok(new { mensaje = "Reserva enviada con éxito", id = nuevaReserva.Id });
+            return Ok(new { mensaje = "Reserva enviada con éxito", id = nuevaReserva.Id, total = precioTotal });
         }
 
         // 3. MODIFICAR RESERVA (Solo Cliente y si está pendiente)
@@ -112,7 +128,11 @@ namespace API_DJCONNECT.Controllers
         [Authorize(Roles = "client")] // Solo clientes pueden editar sus peticiones
         public async Task<IActionResult> UpdateReserva(int id, ReservaUpdateDto reservaDto)
         {
-            var userId = int.Parse(User.FindFirst("id")?.Value);
+            // Usamos la misma lógica de extracción de ID que en tus otros métodos para evitar errores
+            var userIdStr = User.FindFirst("id")?.Value;
+            if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+            int userId = int.Parse(userIdStr);
+
             var reserva = await _context.Reservas.FindAsync(id);
 
             if (reserva == null) return NotFound();
@@ -124,7 +144,10 @@ namespace API_DJCONNECT.Controllers
             if (reserva.Estado != "pendiente")
                 return BadRequest("No puedes editar una reserva que ya ha sido aceptada o rechazada.");
 
-            reserva.FechaEvento = reservaDto.FechaEvento.ToUniversalTime();
+            // ✅ SOLUCIÓN AL DESFASE: Eliminamos .ToUniversalTime() 
+            // Ahora, si el cliente cambia la fecha a las 20:00, se guardarán las 20:00 exactas.
+            reserva.FechaEvento = reservaDto.FechaEvento;
+
             reserva.UbicacionEvento = reservaDto.UbicacionEvento;
             reserva.TipoEvento = reservaDto.TipoEvento;
 
