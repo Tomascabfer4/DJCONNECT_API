@@ -5,7 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
-using API_DJCONNECT.Hubs; // <--- 1. IMPORTANTE: Añade el namespace de tus Hubs
+using API_DJCONNECT.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,9 +14,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<DjConnectContext>(options =>
     options.UseNpgsql(connectionString));
 
-// ==================================================================
 // 2. CONFIGURACIÓN JWT
-// ==================================================================
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -35,7 +33,6 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
     };
 
-    // Configuración opcional para leer el token desde la query string (útil para WebSockets si no envían header)
     options.Events = new JwtBearerEvents
     {
         OnMessageReceived = context =>
@@ -51,14 +48,11 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Agregamos controladores con la opción de ignorar ciclos
 builder.Services.AddControllers().AddJsonOptions(x =>
    x.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
 
-// ==================================================================
-// 3. SIGNALR (NUEVO)
-// ==================================================================
-builder.Services.AddSignalR(); // <--- 2. Registramos el servicio
+// 3. SIGNALR
+builder.Services.AddSignalR();
 
 // 4. Configurar Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -86,18 +80,17 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // ==================================================================
-// 5. CORS ACTUALIZADO (CRÍTICO PARA SIGNALR)
+// 5. CORS MEJORADO (SOLUCIÓN AL ERROR PATCH)
 // ==================================================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.AllowAnyHeader()
-              .AllowAnyMethod()
-              // SignalR requiere credenciales, y AllowAnyOrigin no funciona con AllowCredentials.
-              // Usamos SetIsOriginAllowed para permitir todo en desarrollo.
-              .SetIsOriginAllowed((host) => true)
-              .AllowCredentials(); // <--- NECESARIO para que el socket se conecte
+        policy.WithOrigins("http://localhost:5173") // Es más seguro especificar tu origen de desarrollo
+              .AllowAnyHeader()
+              // Forzamos explícitamente los métodos, incluyendo PATCH y OPTIONS
+              .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
+              .AllowCredentials();
     });
 });
 
@@ -105,8 +98,8 @@ builder.Services.AddScoped<API_DJCONNECT.Services.CloudinaryService>();
 
 var app = builder.Build();
 
-// ORDEN DE MIDDLEWARES
-app.UseCors("AllowAll"); // CORS va primero
+// ORDEN DE MIDDLEWARES (¡IMPORTANTE!)
+app.UseCors("AllowAll");
 
 app.UseSwagger();
 app.UseSwaggerUI();
@@ -117,10 +110,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
-// ==================================================================
-// 6. MAPEO DEL HUB (NUEVO)
-// ==================================================================
-app.MapHub<ChatHub>("/chathub"); // <--- 3. La ruta donde escuchará el chat
+app.MapHub<ChatHub>("/chathub");
 
 app.Run();
