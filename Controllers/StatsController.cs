@@ -27,7 +27,6 @@ namespace API_DJCONNECT.Controllers
             int djId = int.Parse(userIdStr);
 
             // 1. Calcular Ingresos Totales (Reservas finalizadas o aceptadas)
-            // Asumimos que si está aceptada, el dinero ya está "comprometido"
             var ingresosTotales = await _context.Reservas
                 .Where(r => r.DjId == djId && (r.Estado == "finalizada" || r.Estado == "aceptada"))
                 .SumAsync(r => r.PrecioAcordado);
@@ -40,11 +39,18 @@ namespace API_DJCONNECT.Controllers
             var totalBolos = await _context.Reservas
                 .CountAsync(r => r.DjId == djId && (r.Estado == "aceptada" || r.Estado == "finalizada"));
 
-            // 4. Obtener la nota media actual
-            var perfil = await _context.DjPerfiles
-                .FirstOrDefaultAsync(p => p.UsuarioId == djId);
+            // ✅ 4. Obtener la nota media actual (Directamente de la tabla Valoraciones en tiempo real)
+            bool tieneValoraciones = await _context.Valoraciones.AnyAsync(v => v.DjId == djId);
+            double notaMedia = 0;
 
-            double notaMedia = (double)(perfil?.ValoracionPromedio ?? 0);
+            if (tieneValoraciones)
+            {
+                var promedioReal = await _context.Valoraciones
+                    .Where(v => v.DjId == djId)
+                    .AverageAsync(v => (double)v.Puntuacion);
+
+                notaMedia = Math.Round(promedioReal, 1);
+            }
 
             // 5. Próximo evento (El más cercano en el futuro)
             var proximoEvento = await _context.Reservas
