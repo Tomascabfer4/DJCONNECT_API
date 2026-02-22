@@ -26,33 +26,22 @@ namespace API_DJCONNECT.Controllers
             if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
             int djId = int.Parse(userIdStr);
 
-            // 1. Calcular Ingresos Totales (Reservas finalizadas o aceptadas)
             var ingresosTotales = await _context.Reservas
                 .Where(r => r.DjId == djId && (r.Estado == "finalizada" || r.Estado == "aceptada"))
                 .SumAsync(r => r.PrecioAcordado);
 
-            // 2. Contar Reservas Pendientes (Para avisar al DJ que tiene trabajo)
             var reservasPendientes = await _context.Reservas
                 .CountAsync(r => r.DjId == djId && r.Estado == "pendiente");
 
-            // 3. Contar Total de Bolos Confirmados (Futuros y Pasados)
             var totalBolos = await _context.Reservas
                 .CountAsync(r => r.DjId == djId && (r.Estado == "aceptada" || r.Estado == "finalizada"));
 
-            // ✅ 4. Obtener la nota media actual (Directamente de la tabla Valoraciones en tiempo real)
-            bool tieneValoraciones = await _context.Valoraciones.AnyAsync(v => v.DjId == djId);
-            double notaMedia = 0;
+            // ✅ LEEMOS DIRECTAMENTE DEL PERFIL (Rápido y sencillo)
+            var perfil = await _context.DjPerfiles
+                .FirstOrDefaultAsync(p => p.UsuarioId == djId);
 
-            if (tieneValoraciones)
-            {
-                var promedioReal = await _context.Valoraciones
-                    .Where(v => v.DjId == djId)
-                    .AverageAsync(v => (double)v.Puntuacion);
+            double notaMedia = (double)(perfil?.ValoracionPromedio ?? 0);
 
-                notaMedia = Math.Round(promedioReal, 1);
-            }
-
-            // 5. Próximo evento (El más cercano en el futuro)
             var proximoEvento = await _context.Reservas
                 .Where(r => r.DjId == djId && r.Estado == "aceptada" && r.FechaEvento >= DateTime.UtcNow)
                 .OrderBy(r => r.FechaEvento)
