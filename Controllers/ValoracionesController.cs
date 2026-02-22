@@ -23,37 +23,54 @@ namespace API_DJCONNECT.Controllers
         [HttpPost]
         public async Task<IActionResult> PostValoracion(CrearValoracionDto dto)
         {
-            var clienteId = int.Parse(User.FindFirst("id")?.Value);
-
-            // 1. Validar que la reserva existe, es del cliente y está confirmada
-            var reserva = await _context.Reservas
-                .FirstOrDefaultAsync(r => r.Id == dto.ReservaId && r.ClienteId == clienteId);
-
-            if (reserva == null) return NotFound("Reserva no encontrada.");
-            if (reserva.Estado != "aceptada" && reserva.Estado != "finalizada")
-                return BadRequest("Solo puedes valorar reservas aceptadas o finalizadas.");
-
-            // 2. Validar que no se haya valorado ya (1 a 1)
-            var existe = await _context.Valoraciones.AnyAsync(v => v.ReservaId == dto.ReservaId);
-            if (existe) return BadRequest("Esta reserva ya ha sido valorada.");
-
-            // 3. Crear la valoración
-            var valoracion = new Valoracion
+            try
             {
-                ReservaId = dto.ReservaId,
-                ClienteId = clienteId,
-                DjId = reserva.DjId,
-                Puntuacion = Math.Clamp(dto.Puntuacion, 1, 5), // Asegura 1-5
-                Comentario = dto.Comentario
-            };
+                // 1. Obtener y validar el ID del cliente de forma segura
+                var userIdStr = User.FindFirst("id")?.Value;
+                if (string.IsNullOrEmpty(userIdStr))
+                {
+                    return Unauthorized(new { mensaje = "Usuario no autorizado o token inválido." });
+                }
+                var clienteId = int.Parse(userIdStr);
 
-            _context.Valoraciones.Add(valoracion);
-            await _context.SaveChangesAsync();
+                // 2. Validar que la reserva existe, es del cliente y está confirmada
+                var reserva = await _context.Reservas
+                    .FirstOrDefaultAsync(r => r.Id == dto.ReservaId && r.ClienteId == clienteId);
 
-            // 4. Actualizar el promedio en el perfil del DJ
-            await RecalcularPromedioDj(reserva.DjId);
+                if (reserva == null)
+                    return NotFound(new { mensaje = "Reserva no encontrada o no te pertenece." });
 
-            return Ok(new { mensaje = "Valoración guardada correctamente" });
+                if (reserva.Estado != "aceptada" && reserva.Estado != "finalizada")
+                    return BadRequest(new { mensaje = "Solo puedes valorar reservas aceptadas o finalizadas." });
+
+                // 3. Validar que no se haya valorado ya (1 a 1)
+                var existe = await _context.Valoraciones.AnyAsync(v => v.ReservaId == dto.ReservaId);
+                if (existe)
+                    return BadRequest(new { mensaje = "Esta reserva ya ha sido valorada." });
+
+                // 4. Crear la valoración
+                var valoracion = new Valoracion
+                {
+                    ReservaId = dto.ReservaId,
+                    ClienteId = clienteId,
+                    DjId = reserva.DjId,
+                    Puntuacion = Math.Clamp(dto.Puntuacion, 1, 5), // Asegura 1-5
+                    Comentario = dto.Comentario
+                };
+
+                _context.Valoraciones.Add(valoracion);
+                await _context.SaveChangesAsync();
+
+                // 5. Actualizar el promedio en el perfil del DJ
+                await RecalcularPromedioDj(reserva.DjId);
+
+                return Ok(new { mensaje = "Valoración guardada correctamente" });
+            }
+            catch (Exception ex)
+            {
+                // Si algo explota (ej: base de datos caída), devolvemos el error real para no ver el falso CORS
+                return StatusCode(500, new { mensaje = $"Error interno: {ex.InnerException?.Message ?? ex.Message}" });
+            }
         }
 
         // GET: api/Valoraciones/dj/5
