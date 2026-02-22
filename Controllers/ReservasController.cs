@@ -59,69 +59,75 @@ namespace API_DJCONNECT.Controllers
         [HttpPost]
         public async Task<ActionResult> PostReserva(CrearReservaDto reservaDto)
         {
-            var userIdStr = User.FindFirst("id")?.Value;
-            if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
-            var clienteId = int.Parse(userIdStr);
-
-            // 🛡️ NUEVA VALIDACIÓN: Un DJ no puede reservarse a sí mismo
-            if (reservaDto.DjId == clienteId)
-                return BadRequest("No puedes realizar una reserva para ti mismo.");
-
-            // Validación: No reservar en el pasado
-            // Nota: Comparamos con DateTime.Now para validar respecto a la hora local del servidor
-            if (reservaDto.FechaEvento < DateTime.Now)
-                return BadRequest("No puedes crear una reserva para una fecha pasada.");
-
-            var dj = await _context.Usuarios
-                .Include(u => u.DjPerfil)
-                .FirstOrDefaultAsync(u => u.Id == reservaDto.DjId && u.TipoUsuario == "dj");
-
-            if (dj == null) return BadRequest("El DJ seleccionado no existe o no es un perfil de DJ.");
-
-            // 🛡️ VALIDACIÓN DE DISPONIBILIDAD
-            bool ocupado = await _context.Reservas.AnyAsync(r =>
-                r.DjId == reservaDto.DjId &&
-                r.FechaEvento.Date == reservaDto.FechaEvento.Date &&
-                r.Estado == "aceptada");
-
-            if (ocupado)
+            try
             {
-                return BadRequest("El DJ ya tiene un compromiso confirmado para esta fecha.");
+                var userIdStr = User.FindFirst("id")?.Value;
+                if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+                var clienteId = int.Parse(userIdStr);
+
+                // 🛡️ NUEVA VALIDACIÓN: Un DJ no puede reservarse a sí mismo
+                if (reservaDto.DjId == clienteId)
+                    return BadRequest("No puedes realizar una reserva para ti mismo.");
+
+                // ✅ CORRECCIÓN POSTGRES Y ZONA HORARIA: 
+                // Le decimos a C# que la fecha que entra (ej: 22:00) debe tratarse como UTC sin modificar su hora.
+                // Esto soluciona el Error 500 en PostgreSQL y evita que te reste una hora.
+                var fechaCorregida = DateTime.SpecifyKind(reservaDto.FechaEvento, DateTimeKind.Utc);
+
+                // Validación: No reservar en el pasado (ahora comparamos con UtcNow para ser consistentes)
+                if (fechaCorregida < DateTime.UtcNow)
+                    return BadRequest("No puedes crear una reserva para una fecha pasada.");
+
+                var dj = await _context.Usuarios
+                    .Include(u => u.DjPerfil)
+                    .FirstOrDefaultAsync(u => u.Id == reservaDto.DjId && u.TipoUsuario == "dj");
+
+                if (dj == null) return BadRequest("El DJ seleccionado no existe o no es un perfil de DJ.");
+
+                // 🛡️ VALIDACIÓN DE DISPONIBILIDAD
+                bool ocupado = await _context.Reservas.AnyAsync(r =>
+                    r.DjId == reservaDto.DjId &&
+                    r.FechaEvento.Date == fechaCorregida.Date &&
+                    r.Estado == "aceptada");
+
+                if (ocupado)
+                {
+                    return BadRequest("El DJ ya tiene un compromiso confirmado para esta fecha.");
+                }
+
+                // 🛠️ CÁLCULO PROFESIONAL DEL PRECIO TOTAL
+                // Sacamos el número de horas (que ahora envías como "2", "3" desde React)
+                if (!int.TryParse(reservaDto.Horario, out int numHoras)) numHoras = 1;
+
+                // Multiplicamos: PrecioPorHora * Número de horas
+                decimal precioPorHora = dj.DjPerfil?.PrecioPorHora ?? 0;
+                decimal precioTotal = precioPorHora * numHoras;
+
+                var nuevaReserva = new Reserva
+                {
+                    DjId = reservaDto.DjId,
+                    ClienteId = clienteId,
+                    FechaEvento = fechaCorregida, // Guardamos la fecha corregida 
+                    Horario = reservaDto.Horario,
+                    TipoEvento = reservaDto.TipoEvento,
+                    UbicacionEvento = reservaDto.UbicacionEvento,
+                    PrecioAcordado = precioTotal, // Guardamos el Total (ej: 60€)
+                    Estado = "pendiente"
+                };
+
+                _context.Reservas.Add(nuevaReserva);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { mensaje = "Reserva enviada con éxito", id = nuevaReserva.Id, total = precioTotal });
             }
-
-            // 🛠️ CÁLCULO PROFESIONAL DEL PRECIO
-            // Extraemos el número de horas del string 'Horario' (ej: "5")
-            if (!int.TryParse(reservaDto.Horario, out int numHoras)) numHoras = 1;
-
-            // El precio total es: $$PrecioAcordado = PrecioPorHora \times Horas$$
-            decimal precioPorHora = dj.DjPerfil?.PrecioPorHora ?? 0;
-            decimal precioTotal = precioPorHora * numHoras;
-
-            var nuevaReserva = new Reserva
+            catch (Exception ex)
             {
-                DjId = reservaDto.DjId,
-                ClienteId = clienteId,
-
-                // ✅ SOLUCIÓN AL DESFASE DE HORA:
-                // Eliminamos .ToUniversalTime() para que .NET guarde la hora exacta que seleccionó 
-                // el usuario (ej: 22:00) sin restarle la diferencia horaria.
-                FechaEvento = reservaDto.FechaEvento,
-
-                Horario = reservaDto.Horario,
-                TipoEvento = reservaDto.TipoEvento,
-                UbicacionEvento = reservaDto.UbicacionEvento,
-
-                // ✅ ASIGNACIÓN DEL PRECIO TOTAL CALCULADO
-                PrecioAcordado = precioTotal,
-
-                Estado = "pendiente"
-            };
-
-            _context.Reservas.Add(nuevaReserva);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { mensaje = "Reserva enviada con éxito", id = nuevaReserva.Id, total = precioTotal });
+                // 🛑 Si PostgreSQL falla, ahora verás el error real en consola y no un error de CORS
+                return StatusCode(500, new { mensaje = $"Error interno del servidor: {ex.InnerException?.Message ?? ex.Message}" });
+            }
         }
+
+
 
         // 3. MODIFICAR RESERVA (Solo Cliente y si está pendiente)
         [HttpPut("{id}")]
