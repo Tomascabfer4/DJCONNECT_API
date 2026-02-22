@@ -51,7 +51,8 @@ namespace API_DJCONNECT.Controllers
                     NombreCliente = r.Cliente.Nombre,
                     Lugar = r.UbicacionEvento,
                     Precio = r.PrecioAcordado,
-                    Estado = r.Estado
+                    Estado = r.Estado,
+                    Horario = r.Horario
                 }).ToListAsync();
         }
 

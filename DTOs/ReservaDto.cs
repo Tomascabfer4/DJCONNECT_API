@@ -9,5 +9,6 @@
         public string Lugar { get; set; } = string.Empty;
         public decimal Precio { get; set; }
         public string Estado { get; set; } = string.Empty;
+        public string Horario { get; set; } = string.Empty;
     }
 }
