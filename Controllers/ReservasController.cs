@@ -49,6 +49,8 @@ namespace API_DJCONNECT.Controllers
                     Fecha = r.FechaEvento.ToString("dd/MM/yyyy HH:mm"),
                     NombreDj = r.Dj.Nombre,
                     NombreCliente = r.Cliente.Nombre,
+                    FotoDj = r.Dj.FotoPerfil ?? "", 
+                    FotoCliente = r.Cliente.FotoPerfil ?? "",
                     Lugar = r.UbicacionEvento,
                     Precio = r.PrecioAcordado,
                     Estado = r.Estado,
