@@ -1,4 +1,4 @@
-using API_DJCONNECT.Data;
+ï»¿using API_DJCONNECT.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -14,7 +14,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<DjConnectContext>(options =>
     options.UseNpgsql(connectionString));
 
-// 2. CONFIGURACIÓN JWT
+// 2. CONFIGURACIÃ“N JWT
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -79,16 +79,18 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+
 // ==================================================================
-// 5. CORS MEJORADO (SOLUCIÓN AL ERROR PATCH)
+// 5. CORS MEJORADO (SOLUCIÃ“N AL ERROR CLOUDFLARE)
 // ==================================================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("http://localhost:5173") // Es más seguro especificar tu origen de desarrollo
+        // âœ… AÃ‘ADIMOS EL DOMINIO DE CLOUDFLARE A LA LISTA
+        policy.WithOrigins("http://localhost:5173", "https://djconnect-app.pages.dev")
               .AllowAnyHeader()
-              // Forzamos explícitamente los métodos, incluyendo PATCH y OPTIONS
+              // Forzamos explÃ­citamente los mÃ©todos, incluyendo PATCH y OPTIONS
               .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
               .AllowCredentials();
     });
@@ -98,7 +100,7 @@ builder.Services.AddScoped<API_DJCONNECT.Services.CloudinaryService>();
 
 var app = builder.Build();
 
-// ORDEN DE MIDDLEWARES (¡IMPORTANTE!)
+// ORDEN DE MIDDLEWARES (Â¡IMPORTANTE!)
 app.UseCors("AllowAll");
 
 app.UseSwagger();
