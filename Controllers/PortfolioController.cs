@@ -4,8 +4,8 @@ using API_DJCONNECT.Modelos;
 using API_DJCONNECT.Services;
 using API_DJCONNECT.DTOs;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore; // Necesario para ToListAsync
-using CloudinaryDotNet.Actions; // Necesario para ResourceType
+using Microsoft.EntityFrameworkCore;
+using CloudinaryDotNet.Actions;
 
 namespace API_DJCONNECT.Controllers
 {
@@ -22,21 +22,24 @@ namespace API_DJCONNECT.Controllers
             _cloudinaryService = cloudinaryService;
         }
 
-        // POST: api/Portfolio/upload
+        // ==========================================
+        // Vista 'MiPerfil' (Para el DJ).
+        // FLUJO: El DJ sube un archivo (Foto/Vídeo/Audio). Se envía en un FormData (PortfolioUploadDto).
+        // C# lo sube a la nube de Cloudinary, Cloudinary devuelve una URL pública segura, 
+        // y C# guarda esa URL en la base de datos atada al perfil del DJ.
+        // ==========================================
         [Authorize(Roles = "dj")]
         [HttpPost("upload")]
-        // CAMBIO AQUÍ: Ahora recibimos un solo objeto "dto" que tiene todo dentro
         public async Task<ActionResult<DjPortfolioItem>> UploadItem([FromForm] PortfolioUploadDto dto)
         {
             var userId = int.Parse(User.FindFirst("id")?.Value);
 
-            // Usamos dto.File en lugar de file
-            if (dto.File == null || dto.File.Length == 0) return BadRequest("No has subido ningún archivo.");
+            if (dto.File == null || dto.File.Length == 0)
+                return BadRequest("No has subido ningún archivo.");
 
             string url = "";
             string publicId = "";
 
-            // Usamos dto.Tipo
             if (dto.Tipo.ToLower() == "imagen")
             {
                 var result = await _cloudinaryService.UploadImageAsync(dto.File);
@@ -62,7 +65,7 @@ namespace API_DJCONNECT.Controllers
                 Tipo = dto.Tipo.ToLower(),
                 Url = url,
                 PublicId = publicId,
-                Titulo = dto.Titulo // Usamos dto.Titulo
+                Titulo = dto.Titulo
             };
 
             _context.DjPortfolioItems.Add(item);
@@ -71,8 +74,13 @@ namespace API_DJCONNECT.Controllers
             return Ok(item);
         }
 
-        // GET: api/Portfolio/5
+        // ==========================================
+        // Vistas 'DJDetail.jsx' y 'MiPerfil.jsx'.
+        // FLUJO: Obtiene la galería completa de un DJ (fotos, vídeos, etc) para mostrarlos
+        // al cliente como "Escaparate" o al propio DJ para que gestione sus archivos.
+        // ==========================================
         [HttpGet("{djId}")]
+        [AllowAnonymous] // El portfolio es público
         public async Task<ActionResult<IEnumerable<DjPortfolioItem>>> GetPortfolio(int djId)
         {
             return await _context.DjPortfolioItems
@@ -81,7 +89,12 @@ namespace API_DJCONNECT.Controllers
                                  .ToListAsync();
         }
 
-        // DELETE: api/Portfolio/12
+        // ==========================================
+        // Vista 'MiPerfil' (Botón de la Papelera en una foto/video).
+        // FLUJO: El DJ decide borrar un archivo. El Backend primero pide a Cloudinary
+        // que destruya el archivo físico (para no pagar almacenamiento fantasma), y luego 
+        // borra el registro en la base de datos.
+        // ==========================================
         [Authorize(Roles = "dj")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteItem(int id)
@@ -90,13 +103,13 @@ namespace API_DJCONNECT.Controllers
             var item = await _context.DjPortfolioItems.FindAsync(id);
 
             if (item == null) return NotFound();
-            if (item.UsuarioId != userId) return Forbid(); // Solo el dueño borra
+            if (item.UsuarioId != userId) return Forbid(); // Seguridad: Solo el dueño lo puede borrar
 
-            // 1. Borrar de Cloudinary
+            // Borrar de Cloudinary
             var tipoRecurso = item.Tipo == "imagen" ? ResourceType.Image : ResourceType.Video;
             await _cloudinaryService.DeleteFileAsync(item.PublicId, tipoRecurso);
 
-            // 2. Borrar de DB
+            // Borrar de DB
             _context.DjPortfolioItems.Remove(item);
             await _context.SaveChangesAsync();
 

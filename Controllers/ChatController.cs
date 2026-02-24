@@ -5,7 +5,7 @@ using API_DJCONNECT.Modelos;
 using API_DJCONNECT.DTOs;
 using API_DJCONNECT.Hubs;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.SignalR; // Importante para IHubContext
+using Microsoft.AspNetCore.SignalR; 
 
 namespace API_DJCONNECT.Controllers
 {
@@ -15,7 +15,7 @@ namespace API_DJCONNECT.Controllers
     public class ChatController : ControllerBase
     {
         private readonly DjConnectContext _context;
-        private readonly IHubContext<ChatHub> _hubContext; // Inyectamos el Hub
+        private readonly IHubContext<ChatHub> _hubContext; 
 
         public ChatController(DjConnectContext context, IHubContext<ChatHub> hubContext)
         {
@@ -23,18 +23,24 @@ namespace API_DJCONNECT.Controllers
             _hubContext = hubContext;
         }
 
+        // ==========================================
+        // Vista 'Chat.jsx' (Botón de Enviar o tecla Enter).
+        // FLUJO: React envía el texto del mensaje y el ID de la reserva.
+        // C# comprueba que no seas un intruso, guarda el mensaje en la base de datos para el historial,
+        // y se usa SignalR (WebSockets) para disparar el mensaje en tiempo real a la pantalla de la otra persona.
+        // ==========================================
         [HttpPost]
         public async Task<IActionResult> EnviarMensaje(CrearMensajeDto dto)
         {
             var userId = int.Parse(User.FindFirst("id")?.Value);
 
-            // 1. Seguridad: ¿Participas en esta reserva?
+            // Para cortar acceso a otros
             var reserva = await _context.Reservas
                 .FirstOrDefaultAsync(r => r.Id == dto.ReservaId && (r.ClienteId == userId || r.DjId == userId));
 
             if (reserva == null) return Forbid("No tienes acceso a este chat.");
 
-            // 2. Guardar en Base de Datos
+            // Guardar en la BBDD
             var mensaje = new Mensaje
             {
                 ReservaId = dto.ReservaId,
@@ -45,10 +51,10 @@ namespace API_DJCONNECT.Controllers
             _context.Mensajes.Add(mensaje);
             await _context.SaveChangesAsync();
 
-            // 3. Cargar nombre del usuario (para mostrarlo en el chat)
+            // Cargamos el nombre de quien envía para decírselo al frontend
             await _context.Entry(mensaje).Reference(m => m.Emisor).LoadAsync();
 
-            // 4. SIGNALR: Enviar evento a la sala específica
+            // Emitir en vivo a todos los conectados a la "Sala" (Grupo) de esta reserva
             await _hubContext.Clients.Group(dto.ReservaId.ToString())
                 .SendAsync("RecibirMensaje", new
                 {
@@ -62,11 +68,21 @@ namespace API_DJCONNECT.Controllers
             return Ok(mensaje);
         }
 
+        // ==========================================
+        // Vista 'Chat.jsx' (Al entrar a la pantalla).
+        // FLUJO: Antes de conectar los WebSockets, React necesita saber de qué hablabais ayer.
+        // Este endpoint busca todos los mensajes antiguos de esa reserva, los ordena por fecha, 
+        // y le dice a React cuáles son "Tuyos" (EsMio = true) para pintarlos a la derecha o a la izquierda.
+        // ==========================================
         [HttpGet("{reservaId}")]
         public async Task<ActionResult> GetHistorial(int reservaId)
         {
             var userId = int.Parse(User.FindFirst("id")?.Value);
-            // ... (Lógica de validación igual que arriba) ...
+            
+            var reserva = await _context.Reservas
+                .FirstOrDefaultAsync(r => r.Id == reservaId && (r.ClienteId == userId || r.DjId == userId));
+
+            if (reserva == null) return Forbid("No tienes acceso a este chat.");
 
             var mensajes = await _context.Mensajes
                .Where(m => m.ReservaId == reservaId)
@@ -76,7 +92,7 @@ namespace API_DJCONNECT.Controllers
                    m.Contenido,
                    m.FechaEnvio,
                    EmisorNombre = m.Emisor.Nombre,
-                   EsMio = m.EmisorId == userId
+                   EsMio = m.EmisorId == userId // Para saber si es tuyo el mensaje
                })
                .ToListAsync();
 

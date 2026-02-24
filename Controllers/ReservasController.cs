@@ -10,7 +10,7 @@ namespace API_DJCONNECT.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize] // Solo usuarios logueados pueden acceder a cualquier método
+    [Authorize] // Todo aquí requiere estar logueado
     public class ReservasController : ControllerBase
     {
         private readonly DjConnectContext _context;
@@ -20,7 +20,12 @@ namespace API_DJCONNECT.Controllers
             _context = context;
         }
 
-        // 1. LISTAR MIS RESERVAS
+        // ==========================================
+        // Vistas 'MyReservations.jsx' y 'Chats.jsx'.
+        // FLUJO: React llama a este endpoint al cargar esas páginas. C# lee el token del usuario,
+        // deduce si es DJ o Cliente, y le devuelve una lista de tarjetas (ReservaDto) que incluyen
+        // la foto y el nombre de la "otra persona" para pintar la bandeja de entrada y los tickets.
+        // ==========================================
         [HttpGet]
         public async Task<ActionResult<IEnumerable<ReservaDto>>> GetReservas()
         {
@@ -35,12 +40,12 @@ namespace API_DJCONNECT.Controllers
                 .Include(r => r.Cliente)
                 .AsQueryable();
 
+            // Filtramos dependiendo de quién pregunta (Un DJ no ve las reservas de otros DJs)
             if (rol == "dj")
                 query = query.Where(r => r.DjId == userId && r.Estado != "cancelada");
             else
                 query = query.Where(r => r.ClienteId == userId && r.Estado != "cancelada");
 
-            // Ordenamos por fecha más cercana
             return await query
                 .OrderBy(r => r.FechaEvento)
                 .Select(r => new ReservaDto
@@ -49,7 +54,7 @@ namespace API_DJCONNECT.Controllers
                     Fecha = r.FechaEvento.ToString("dd/MM/yyyy HH:mm"),
                     NombreDj = r.Dj.Nombre,
                     NombreCliente = r.Cliente.Nombre,
-                    FotoDj = r.Dj.FotoPerfil ?? "", 
+                    FotoDj = r.Dj.FotoPerfil ?? "",
                     FotoCliente = r.Cliente.FotoPerfil ?? "",
                     Lugar = r.UbicacionEvento,
                     Precio = r.PrecioAcordado,
@@ -58,7 +63,12 @@ namespace API_DJCONNECT.Controllers
                 }).ToListAsync();
         }
 
-        // 2. CREAR RESERVA (Segura y sin auto-contratación)
+        // ==========================================
+        // Vista 'DJDetail.jsx' (Botón "Solicitar Reserva").
+        // FLUJO: El cliente selecciona fecha, horas y lugar. React lo manda en un 'CrearReservaDto'.
+        // C# comprueba que el DJ no esté ocupado ese día, calcula matemáticamente el precio final (horas * tarifa)
+        // y guarda el contrato en estado "Pendiente".
+        // ==========================================
         [HttpPost]
         public async Task<ActionResult> PostReserva(CrearReservaDto reservaDto)
         {
@@ -68,16 +78,11 @@ namespace API_DJCONNECT.Controllers
                 if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
                 var clienteId = int.Parse(userIdStr);
 
-                // 🛡️ NUEVA VALIDACIÓN: Un DJ no puede reservarse a sí mismo
                 if (reservaDto.DjId == clienteId)
                     return BadRequest("No puedes realizar una reserva para ti mismo.");
 
-                // ✅ CORRECCIÓN POSTGRES Y ZONA HORARIA: 
-                // Le decimos a C# que la fecha que entra (ej: 22:00) debe tratarse como UTC sin modificar su hora.
-                // Esto soluciona el Error 500 en PostgreSQL y evita que te reste una hora.
                 var fechaCorregida = DateTime.SpecifyKind(reservaDto.FechaEvento, DateTimeKind.Utc);
 
-                // Validación: No reservar en el pasado (ahora comparamos con UtcNow para ser consistentes)
                 if (fechaCorregida < DateTime.UtcNow)
                     return BadRequest("No puedes crear una reserva para una fecha pasada.");
 
@@ -85,24 +90,18 @@ namespace API_DJCONNECT.Controllers
                     .Include(u => u.DjPerfil)
                     .FirstOrDefaultAsync(u => u.Id == reservaDto.DjId && u.TipoUsuario == "dj");
 
-                if (dj == null) return BadRequest("El DJ seleccionado no existe o no es un perfil de DJ.");
+                if (dj == null) return BadRequest("El DJ seleccionado no existe.");
 
-                // 🛡️ VALIDACIÓN DE DISPONIBILIDAD
+                // El DJ no puede aceptar dos bolos el mismo día
                 bool ocupado = await _context.Reservas.AnyAsync(r =>
                     r.DjId == reservaDto.DjId &&
                     r.FechaEvento.Date == fechaCorregida.Date &&
                     r.Estado == "aceptada");
 
-                if (ocupado)
-                {
-                    return BadRequest("El DJ ya tiene un compromiso confirmado para esta fecha.");
-                }
+                if (ocupado) return BadRequest("El DJ ya tiene un compromiso confirmado para esta fecha.");
 
-                // 🛠️ CÁLCULO PROFESIONAL DEL PRECIO TOTAL
-                // Sacamos el número de horas (que ahora envías como "2", "3" desde React)
+                // Cálculo automático del presupuesto
                 if (!int.TryParse(reservaDto.Horario, out int numHoras)) numHoras = 1;
-
-                // Multiplicamos: PrecioPorHora * Número de horas
                 decimal precioPorHora = dj.DjPerfil?.PrecioPorHora ?? 0;
                 decimal precioTotal = precioPorHora * numHoras;
 
@@ -110,12 +109,12 @@ namespace API_DJCONNECT.Controllers
                 {
                     DjId = reservaDto.DjId,
                     ClienteId = clienteId,
-                    FechaEvento = fechaCorregida, // Guardamos la fecha corregida 
+                    FechaEvento = fechaCorregida,
                     Horario = reservaDto.Horario,
                     TipoEvento = reservaDto.TipoEvento,
                     UbicacionEvento = reservaDto.UbicacionEvento,
-                    PrecioAcordado = precioTotal, // Guardamos el Total (ej: 60€)
-                    Estado = "pendiente"
+                    PrecioAcordado = precioTotal,
+                    Estado = "pendiente" // El DJ decide si aceptar o no el evento
                 };
 
                 _context.Reservas.Add(nuevaReserva);
@@ -125,38 +124,30 @@ namespace API_DJCONNECT.Controllers
             }
             catch (Exception ex)
             {
-                // 🛑 Si PostgreSQL falla, ahora verás el error real en consola y no un error de CORS
-                return StatusCode(500, new { mensaje = $"Error interno del servidor: {ex.InnerException?.Message ?? ex.Message}" });
+                return StatusCode(500, new { mensaje = $"Error interno: {ex.InnerException?.Message ?? ex.Message}" });
             }
         }
 
-
-
-        // 3. MODIFICAR RESERVA (Solo Cliente y si está pendiente)
+        // ==========================================
+        // ESTO AUN NO SE USA, SE DEJA EL ENDPOINT PARA UN FUTURO
+        // FLUJO: Permite a un Cliente editar los detalles del evento (ej: cambió el local) 
+        // siempre y cuando el DJ aún no haya aceptado el contrato ("Pendiente").
+        // ==========================================
         [HttpPut("{id}")]
-        [Authorize(Roles = "client")] // Solo clientes pueden editar sus peticiones
+        [Authorize(Roles = "client")]
         public async Task<IActionResult> UpdateReserva(int id, ReservaUpdateDto reservaDto)
         {
-            // Usamos la misma lógica de extracción de ID que en tus otros métodos para evitar errores
             var userIdStr = User.FindFirst("id")?.Value;
             if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
             int userId = int.Parse(userIdStr);
 
             var reserva = await _context.Reservas.FindAsync(id);
-
             if (reserva == null) return NotFound();
 
-            // Seguridad: ¿Es tu reserva?
             if (reserva.ClienteId != userId) return Forbid();
+            if (reserva.Estado != "pendiente") return BadRequest("No puedes editar una reserva ya procesada.");
 
-            // Solo editable si no ha sido procesada
-            if (reserva.Estado != "pendiente")
-                return BadRequest("No puedes editar una reserva que ya ha sido aceptada o rechazada.");
-
-            // ✅ SOLUCIÓN AL DESFASE: Eliminamos .ToUniversalTime() 
-            // Ahora, si el cliente cambia la fecha a las 20:00, se guardarán las 20:00 exactas.
             reserva.FechaEvento = reservaDto.FechaEvento;
-
             reserva.UbicacionEvento = reservaDto.UbicacionEvento;
             reserva.TipoEvento = reservaDto.TipoEvento;
 
@@ -164,9 +155,13 @@ namespace API_DJCONNECT.Controllers
             return Ok(new { mensaje = "Reserva actualizada" });
         }
 
-        // 4. CAMBIAR ESTADO (Solo DJ: Aceptar/Rechazar)
+        // ==========================================
+        // Vista 'MyReservations.jsx' (Botones verdes y rojos del DJ).
+        // FLUJO: Cuando el DJ pulsa "Aceptar" o "Rechazar", React manda ese texto (string).
+        // C# cambia el estado en la base de datos, lo que hace que desaparezcan los botones en React
+        // y se actualice el Dashboard del DJ para sumar el dinero.
+        // ==========================================
         [HttpPut("{id}/estado")]
-        // Quitamos el Role="dj" estricto aquí para manejarlo manualmente si el token usa "role" en vez de "Role"
         public async Task<IActionResult> CambiarEstado(int id, [FromBody] string nuevoEstado)
         {
             var userIdStr = User.FindFirst("id")?.Value;
@@ -177,8 +172,7 @@ namespace API_DJCONNECT.Controllers
             var reserva = await _context.Reservas.FindAsync(id);
             if (reserva == null) return NotFound();
 
-            if (reserva.DjId != int.Parse(userIdStr))
-                return Forbid("No tienes permiso sobre esta reserva.");
+            if (reserva.DjId != int.Parse(userIdStr)) return Forbid("No tienes permiso sobre esta reserva.");
 
             var estadoLimpiado = nuevoEstado.ToLower().Trim();
             var estadosValidos = new[] { "aceptada", "rechazada" };
@@ -192,25 +186,23 @@ namespace API_DJCONNECT.Controllers
             return Ok(new { mensaje = $"La reserva ahora está: {reserva.Estado}" });
         }
 
-        // 5. ELIMINAR / CANCELAR RESERVA
+        // ==========================================
+        // ESTO AUN NO SE USA, SE DEJA EL ENDPOINT PARA UN FUTURO
+        // FLUJO: Un botón de "Cancelar evento". En lugar de borrar la fila de la DB (lo que rompería
+        // facturas y chats antiguos), lo marcamos como "cancelada" (Soft Delete).
+        // ==========================================
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteReserva(int id)
         {
-            // 1. Obtener ID del usuario que hace la petición
             var userId = int.Parse(User.FindFirst("id")?.Value);
-
-            // 2. Buscar la reserva
             var reserva = await _context.Reservas.FindAsync(id);
 
             if (reserva == null) return NotFound();
 
-            // 3. Seguridad: Solo el Cliente o el DJ implicados pueden cancelar
             if (reserva.ClienteId != userId && reserva.DjId != userId)
                 return Forbid("No tienes permiso para cancelar esta reserva.");
 
-            // 4. Lógica de negocio: Cambiar estado en lugar de borrar
             reserva.Estado = "cancelada";
-
             await _context.SaveChangesAsync();
 
             return Ok(new { mensaje = "La reserva ha sido cancelada correctamente.", estado = reserva.Estado });

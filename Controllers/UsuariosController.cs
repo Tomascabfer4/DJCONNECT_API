@@ -19,10 +19,8 @@ namespace API_DJCONNECT.Controllers
     {
         private readonly DjConnectContext _context;
         private readonly IConfiguration _configuration;
-        // 1. Añadimos el servicio de Cloudinary
         private readonly CloudinaryService _cloudinaryService;
 
-        // 2. Actualizamos el constructor para inyectar el servicio
         public UsuariosController(DjConnectContext context, IConfiguration configuration, CloudinaryService cloudinaryService)
         {
             _context = context;
@@ -30,13 +28,16 @@ namespace API_DJCONNECT.Controllers
             _cloudinaryService = cloudinaryService;
         }
 
+        // ==========================================
+        // 'Register.jsx' (Pestaña Cliente).
+        // FLUJO: Recibe los datos planos, encripta la contraseña con BCrypt (por seguridad)
+        // y guarda al usuario en la tabla Usuarios con el rol "client".
+        // ==========================================
         [HttpPost("registro/cliente")]
         public async Task<ActionResult<UsuarioPerfilDto>> RegistrarCliente(RegistroDto registroDto)
         {
             if (await _context.Usuarios.AnyAsync(u => u.Email == registroDto.Email))
-            {
                 return BadRequest("El email ya existe.");
-            }
 
             var usuario = new Usuario
             {
@@ -60,13 +61,16 @@ namespace API_DJCONNECT.Controllers
             });
         }
 
+        // ==========================================
+        // 'Register.jsx' (Pestaña DJ).
+        // FLUJO: Igual que el cliente, pero con una diferencia vital: también crea automáticamente 
+        // una fila vinculada en la tabla 'DjPerfiles' para que el DJ tenga un catálogo desde el minuto 1.
+        // ==========================================
         [HttpPost("registro/dj")]
         public async Task<ActionResult<UsuarioPerfilDto>> RegistrarDJ(RegistroDto registroDto)
         {
             if (await _context.Usuarios.AnyAsync(u => u.Email == registroDto.Email))
-            {
                 return BadRequest("El email ya existe.");
-            }
 
             var usuario = new Usuario
             {
@@ -81,6 +85,7 @@ namespace API_DJCONNECT.Controllers
             _context.Usuarios.Add(usuario);
             await _context.SaveChangesAsync();
 
+            // Creamos el perfil público vacío por defecto
             var perfil = new DjPerfil
             {
                 UsuarioId = usuario.Id,
@@ -95,15 +100,19 @@ namespace API_DJCONNECT.Controllers
             return Ok(new { mensaje = "DJ registrado correctamente", id = usuario.Id });
         }
 
+        // ==========================================
+        // 'Login.jsx' y 'AuthContext.jsx'.
+        // FLUJO: Comprueba el email y la contraseña desencriptada. Si es correcto, empaqueta
+        // la ID y el Rol del usuario en un Token JWT (el "pase VIP") y se lo devuelve a React 
+        // para que lo guarde en el LocalStorage.
+        // ==========================================
         [HttpPost("login")]
         public async Task<ActionResult<object>> Login([FromBody] LoginDto loginData)
         {
             var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Email == loginData.Email && u.Activo == true);
 
             if (usuario == null || !BCrypt.Net.BCrypt.Verify(loginData.Password, usuario.PasswordHash))
-            {
                 return Unauthorized("Email o contraseña incorrectos.");
-            }
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -120,7 +129,7 @@ namespace API_DJCONNECT.Controllers
                 issuer: _configuration["Jwt:Issuer"],
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.Now.AddHours(2),
+                expires: DateTime.Now.AddHours(2), // Caduca a las 2 horas por seguridad
                 signingCredentials: creds
             );
 
@@ -132,22 +141,11 @@ namespace API_DJCONNECT.Controllers
             });
         }
 
-        [HttpGet("{id}")]
-        public async Task<ActionResult<UsuarioPerfilDto>> GetUsuario(int id)
-        {
-            var usuario = await _context.Usuarios.FindAsync(id);
-            if (usuario == null) return NotFound();
-
-            return new UsuarioPerfilDto
-            {
-                Id = usuario.Id,
-                Nombre = usuario.Nombre,
-                Email = usuario.Email,
-                Foto = usuario.FotoPerfil,
-                Rol = usuario.TipoUsuario
-            };
-        }
-
+        // ==========================================
+        // 'AuthContext.jsx' (Función checkAuth).
+        // FLUJO: Cada vez que el usuario recarga la página en React (F5), React manda su Token aquí. 
+        // El Backend lee el ID oculto en el token y le devuelve todos sus datos para mantener la sesión viva.
+        // ==========================================
         [Authorize]
         [HttpGet("me")]
         public async Task<ActionResult<UsuarioPerfilDto>> GetMyProfile()
@@ -168,6 +166,31 @@ namespace API_DJCONNECT.Controllers
             };
         }
 
+        // ==========================================
+        // ESTO AUN NO SE USA, SE DEJA EL ENDPOINT PARA UN FUTURO
+        // FLUJO: Permite obtener los datos básicos de CUALQUIER usuario si tienes su ID.
+        // Podría servir en el futuro para una vista de "Perfil de Cliente".
+        // ==========================================
+        [HttpGet("{id}")]
+        public async Task<ActionResult<UsuarioPerfilDto>> GetUsuario(int id)
+        {
+            var usuario = await _context.Usuarios.FindAsync(id);
+            if (usuario == null) return NotFound();
+
+            return new UsuarioPerfilDto
+            {
+                Id = usuario.Id,
+                Nombre = usuario.Nombre,
+                Email = usuario.Email,
+                Foto = usuario.FotoPerfil,
+                Rol = usuario.TipoUsuario
+            };
+        }
+
+        // ==========================================
+        // Pestaña 'Configuración' (Para cambiar el Nombre/Teléfono).
+        // FLUJO: Actualiza los datos de la tabla base 'Usuarios'.
+        // ==========================================
         [Authorize]
         [HttpPut("perfil")]
         public async Task<IActionResult> UpdateMiPerfil(UpdateClienteDto datos)
@@ -179,28 +202,15 @@ namespace API_DJCONNECT.Controllers
             usuario.Nombre = datos.Nombre;
             usuario.Telefono = datos.Telefono;
             usuario.Ubicacion = datos.Ubicacion;
-            // 3. Eliminada la línea de FotoPerfil para forzar el uso del endpoint de subida de archivos
 
             await _context.SaveChangesAsync();
             return Ok(new { mensaje = "Datos actualizados correctamente" });
         }
 
-        [Authorize]
-        [HttpDelete("desactivar-cuenta")]
-        public async Task<IActionResult> DesactivarCuenta()
-        {
-            var userId = int.Parse(User.FindFirst("id")?.Value);
-            var usuario = await _context.Usuarios.FindAsync(userId);
-            if (usuario == null) return NotFound();
-
-            usuario.Activo = false;
-            await _context.SaveChangesAsync();
-
-            return Ok(new { mensaje = "Tu cuenta ha sido desactivada." });
-        }
-
         // ==========================================
-        // GESTIÓN DE FOTO DE PERFIL (SUBIR / CAMBIAR)
+        // Pestaña 'Configuración' (Componente de Avatar).
+        // FLUJO: Recibe una imagen física, la sube a Cloudinary (servidor de imágenes),
+        // borra la foto antigua si existía, y guarda la nueva URL en la base de datos.
         // ==========================================
         [Authorize]
         [HttpPut("perfil/foto")]
@@ -211,7 +221,6 @@ namespace API_DJCONNECT.Controllers
 
             if (usuario == null) return NotFound("Usuario no encontrado.");
 
-            // Si ya tenía foto antes, la borramos de Cloudinary
             if (!string.IsNullOrEmpty(usuario.FotoPerfilPublicId))
             {
                 await _cloudinaryService.DeleteFileAsync(usuario.FotoPerfilPublicId, CloudinaryDotNet.Actions.ResourceType.Image);
@@ -229,7 +238,8 @@ namespace API_DJCONNECT.Controllers
         }
 
         // ==========================================
-        // ELIMINAR FOTO DE PERFIL
+        // ESTO AUN NO SE USA, SE DEJA EL ENDPOINT PARA UN FUTURO
+        // FLUJO: Borra la imagen de Cloudinary para ahorrar espacio y limpia la DB.
         // ==========================================
         [Authorize]
         [HttpDelete("perfil/foto")]
@@ -251,6 +261,25 @@ namespace API_DJCONNECT.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { mensaje = "Foto de perfil eliminada." });
+        }
+
+        // ==========================================
+        // ESTO AUN NO SE USA, SE DEJA EL ENDPOINT PARA UN FUTURO.
+        // FLUJO: Un "Soft Delete". En lugar de borrar al usuario (que rompería las reservas pasadas),
+        // lo marcamos como Activo = false para que no pueda loguearse ni salir en las búsquedas.
+        // ==========================================
+        [Authorize]
+        [HttpDelete("desactivar-cuenta")]
+        public async Task<IActionResult> DesactivarCuenta()
+        {
+            var userId = int.Parse(User.FindFirst("id")?.Value);
+            var usuario = await _context.Usuarios.FindAsync(userId);
+            if (usuario == null) return NotFound();
+
+            usuario.Activo = false;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { mensaje = "Tu cuenta ha sido desactivada." });
         }
     }
 }
