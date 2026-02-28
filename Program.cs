@@ -88,7 +88,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowAll", policy =>
     {
         // ✅ AÑADIMOS EL DOMINIO DE CLOUDFLARE A LA LISTA
-        policy.WithOrigins("http://localhost:5173", "https://djconnect-app.pages.dev")
+        policy.WithOrigins("http://localhost:5173", "https://djconnect-app.pages.dev", "https://www.djconnect.app/")
               .AllowAnyHeader()
               // Forzamos explícitamente los métodos, incluyendo PATCH y OPTIONS
               .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
